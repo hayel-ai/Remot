@@ -2,6 +2,7 @@ package com.example.remot
 
 import android.content.Context
 import android.hardware.ConsumerIrManager
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -45,8 +46,28 @@ object IrEngine {
         }
         return runCatching {
             m.transmit(action.frequencyHz, action.patternMicros)
-            "تم إرسال (${action.label}) • ${action.frequencyHz} Hz"
+            "تم الإرسال: ${action.label}"
         }
+    }
+
+    suspend fun transmitAutoScan(
+        ctx: Context,
+        actions: List<RemoteAction>,
+        onStep: (String) -> Unit
+    ): Result<String> {
+        val m = manager(ctx)
+        if (m == null || !runCatching { m.hasIrEmitter() }.getOrDefault(false)) {
+            return Result.failure(IllegalStateException("هذا الهاتف لا يحتوي على مرسل الأشعة تحت الحمراء (IR Blaster)"))
+        }
+        if (actions.isEmpty()) {
+            return Result.failure(IllegalStateException("لا توجد أكواد للمسح"))
+        }
+        for ((index, act) in actions.withIndex()) {
+            onStep("جاري تجربة (${index + 1}/${actions.size}): ${act.label}...")
+            runCatching { m.transmit(act.frequencyHz, act.patternMicros) }
+            delay(450L)
+        }
+        return Result.success("اكتمل إرسال حزمة الأكواد (${actions.size} إشارة)")
     }
 
     fun necPattern(code32Bit: Long): IntArray {
@@ -82,17 +103,6 @@ object IrEngine {
         return 38000 to necPattern(value)
     }
 
-    fun quickSweepActions(): List<RemoteAction> = listOf(
-        RemoteAction("sw_1", "تجربة 1 (LG/Display)", 38000, necPattern(0x20DF10EF)),
-        RemoteAction("sw_2", "تجربة 2 (Samsung)", 38000, necPattern(0xE0E040BF)),
-        RemoteAction("sw_3", "تجربة 3 (Sony)", 40000, necPattern(0x00A90A95)),
-        RemoteAction("sw_4", "تجربة 4 (Panasonic)", 36700, necPattern(0x40040100BCBD)),
-        RemoteAction("sw_5", "تجربة 5 (Receiver A)", 38000, necPattern(0x807F02FD)),
-        RemoteAction("sw_6", "تجربة 6 (Receiver B)", 38000, necPattern(0x00FF00FF)),
-        RemoteAction("sw_7", "تجربة 7 (Source/HDMI)", 38000, necPattern(0x20DFD02F)),
-        RemoteAction("sw_8", "تجربة 8 (Mute)", 38000, necPattern(0x20DF906F))
-    )
-
     fun defaultProfiles(): List<RemoteProfile> = listOf(
         RemoteProfile(
             id = "campus_displays_pro",
@@ -100,14 +110,21 @@ object IrEngine {
             brand = "LG / Samsung / NEC / Panasonic / Sony",
             category = DeviceCategory.TV,
             actions = listOf(
-                RemoteAction("d_pwr", "تشغيل / إطفاء", 38000, necPattern(0x20DF10EF)),
-                RemoteAction("d_pwr_alt", "باور بديل (Samsung)", 38000, necPattern(0xE0E040BF)),
-                RemoteAction("d_src", "تغيير المدخل (HDMI/Input)", 38000, necPattern(0x20DFD02F)),
-                RemoteAction("d_src_alt", "مصدر بديل (Source)", 38000, necPattern(0xE0E0807F)),
-                RemoteAction("d_vol_up", "رفع الصوت +", 38000, necPattern(0x20DF40BF)),
-                RemoteAction("d_vol_dn", "خفض الصوت -", 38000, necPattern(0x20DFC03F)),
-                RemoteAction("d_mute", "كتم الصوت", 38000, necPattern(0x20DF906F)),
-                RemoteAction("d_menu", "القائمة (Menu)", 38000, necPattern(0x20DFC23D))
+                RemoteAction("pwr", "POWER", 38000, necPattern(0x20DF10EF)),
+                RemoteAction("pwr_alt", "POWER ALT", 38000, necPattern(0xE0E040BF)),
+                RemoteAction("src", "SOURCE / INPUT", 38000, necPattern(0x20DFD02F)),
+                RemoteAction("menu", "MENU", 38000, necPattern(0x20DFC23D)),
+                RemoteAction("exit", "EXIT / BACK", 38000, necPattern(0x20DF14EB)),
+                RemoteAction("mute", "MUTE", 38000, necPattern(0x20DF906F)),
+                RemoteAction("vol_up", "VOL +", 38000, necPattern(0x20DF40BF)),
+                RemoteAction("vol_dn", "VOL -", 38000, necPattern(0x20DFC03F)),
+                RemoteAction("ch_up", "CH +", 38000, necPattern(0x20DF00FF)),
+                RemoteAction("ch_dn", "CH -", 38000, necPattern(0x20DF807F)),
+                RemoteAction("ok", "OK", 38000, necPattern(0x20DF22DD)),
+                RemoteAction("up", "▲", 38000, necPattern(0x20DF02FD)),
+                RemoteAction("down", "▼", 38000, necPattern(0x20DF827D)),
+                RemoteAction("left", "◀", 38000, necPattern(0x20DFE01F)),
+                RemoteAction("right", "▶", 38000, necPattern(0x20DF609F))
             )
         ),
         RemoteProfile(
@@ -116,24 +133,22 @@ object IrEngine {
             brand = "beIN / Spider / Tiger / Starsat / Humax",
             category = DeviceCategory.RECEIVER,
             actions = listOf(
-                RemoteAction("r_pwr", "باور الرسيفر", 38000, necPattern(0x807F02FD)),
-                RemoteAction("r_pwr_alt", "باور رسيفر بديل", 38000, necPattern(0x00FF00FF)),
-                RemoteAction("r_ok", "موافق (OK)", 38000, necPattern(0x807F4AB5)),
-                RemoteAction("r_ch_up", "قناة للأعلى ▲", 38000, necPattern(0x807F12ED)),
-                RemoteAction("r_ch_dn", "قناة للأسفل ▼", 38000, necPattern(0x807F1AE5)),
-                RemoteAction("r_vol_up", "صوت +", 38000, necPattern(0x807F0AF5)),
-                RemoteAction("r_vol_dn", "صوت -", 38000, necPattern(0x807F1EE1)),
-                RemoteAction("r_exit", "خروج / رجوع (Exit)", 38000, necPattern(0x807F52AD)),
-                RemoteAction("r_menu", "القائمة الرئيسية", 38000, necPattern(0x807F629D)),
-                RemoteAction("r_info", "معلومات القناة (Info)", 38000, necPattern(0x807F22DD))
+                RemoteAction("pwr", "POWER", 38000, necPattern(0x807F02FD)),
+                RemoteAction("pwr_alt", "POWER ALT", 38000, necPattern(0x00FF00FF)),
+                RemoteAction("src", "SOURCE / TV-SAT", 38000, necPattern(0x807F32CD)),
+                RemoteAction("menu", "MENU", 38000, necPattern(0x807F629D)),
+                RemoteAction("exit", "EXIT", 38000, necPattern(0x807F52AD)),
+                RemoteAction("mute", "MUTE", 38000, necPattern(0x807F08F7)),
+                RemoteAction("vol_up", "VOL +", 38000, necPattern(0x807F0AF5)),
+                RemoteAction("vol_dn", "VOL -", 38000, necPattern(0x807F1EE1)),
+                RemoteAction("ch_up", "CH +", 38000, necPattern(0x807F12ED)),
+                RemoteAction("ch_dn", "CH -", 38000, necPattern(0x807F1AE5)),
+                RemoteAction("ok", "OK", 38000, necPattern(0x807F4AB5)),
+                RemoteAction("up", "▲", 38000, necPattern(0x807F2AD5)),
+                RemoteAction("down", "▼", 38000, necPattern(0x807F7887)),
+                RemoteAction("left", "◀", 38000, necPattern(0x807F9E61)),
+                RemoteAction("right", "▶", 38000, necPattern(0x807F38C7))
             )
-        ),
-        RemoteProfile(
-            id = "quick_sweep_profile",
-            name = "مسح وتجربة سريعة",
-            brand = "اختبار متعدد للشاشات والرسيفرات",
-            category = DeviceCategory.CUSTOM,
-            actions = quickSweepActions()
         )
     )
 
